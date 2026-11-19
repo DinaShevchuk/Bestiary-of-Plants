@@ -35,3 +35,28 @@ chore: document local run
 - документация обновлена, если изменились интерфейс, схема данных, API или запуск;
 - изменение закоммичено и доступно остальным;
 - владелец может кратко объяснить своё изменение.
+
+
+## 5. Локальная проверка текущего backend
+
+Из корня репозитория:
+
+```bash
+python -m pip install -r requirements.txt
+cp .env.example .env
+python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
+python -m compileall -q backend
+python -m pytest -q
+python -m backend.scripts.validate_corpus
+python -m backend.scripts.run_benchmark
+node --check js/app.js  # при установленном Node.js
+```
+
+Для Ollama или OpenAI-compatible endpoint укажите провайдера, URL, модель и ключ в локальном `.env`. Не помещайте ключи в PR, исходники или скриншоты. Фотоидентификация требует `PLANTNET_API_KEY`. Демо-корпус можно запускать без внешних ключей, но его записи пока имеют статус `demo_unverified`.
+
+## 6. Что считается проверкой интеграции
+
+- Unit/API tests не заменяют живой вызов Ollama/API или Pl@ntNet.
+- Fake LLM доказывает корректность orchestration contract, но не совместимость конкретной модели и её tool calling.
+- Smoke benchmark на четырёх запросах не заменяет полный размеченный benchmark.
+- После изменения схемы корпуса, источников, API или UI обязательно обновляйте связанные документы в `docs/`.

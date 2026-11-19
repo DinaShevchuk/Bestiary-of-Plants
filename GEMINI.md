@@ -1,5 +1,5 @@
 # Gemini CLI — проект «Бестиарий растений»
 
-Сначала прочитай корневой `AGENTS.md` и документы `docs/ai/PROJECT_CONTEXT.md`, `docs/ai/WORKFLOW.md`, `docs/ai/DEFINITION_OF_DONE.md`.
+Сначала прочитай `AGENTS.md`, `docs/ai/PROJECT_CONTEXT.md`, `docs/ai/WORKFLOW.md` и `docs/ai/DEFINITION_OF_DONE.md`.
 
-Следуй им как основной инструкции проекта: проверь фактический стек и состояние Git; сохраняй существующие HTML/Figma; вноси минимальные изменения; обновляй SDD и контракты при необходимости; не выдавай планируемый BM25/RAG за реализованный; не выдумывай источники и не раскрывай секреты. Перед завершением выполни доступные проверки и честно укажи результаты.
+Проект содержит HTML/CSS/JS frontend и Python/FastAPI backend. BM25, JSONL corpus loader, RAG, bounded tool-calling Agentic RAG и API интеграция реализованы. Live generation зависит от Ollama/OpenAI-compatible конфигурации; фотоидентификация требует Pl@ntNet API key. Seed corpus состоит из demo_unverified записей. Не преувеличивай качество/проверенность корпуса; сохраняй текущий UI и стек; обновляй SDD, контракты и тесты при изменении поведения.
