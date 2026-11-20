@@ -1,110 +1,139 @@
-# Черновой API-контракт
+# API-контракт (реализован)
 
-**Статус:** проектный контракт для согласования frontend/backend, не описание уже работающего API.  
-**Базовый префикс:** `/api/v1` (если команда выберет другой вариант, зафиксировать одно значение во всех компонентах).
+**Base URL локально:** `http://127.0.0.1:8000`  
+**Префикс API:** `/api/v1`  
+**Формат:** JSON UTF-8, кроме multipart upload для изображения.
 
 ## 1. Общие соглашения
 
-- Формат обмена: JSON, UTF-8.
-- Ошибки имеют единый формат.
-- Ключи LLM и другие секреты доступны только backend.
-- `document_id` — стабильный внутренний идентификатор документа корпуса.
-- `source_url` может отсутствовать, если у записи нет внешней ссылки; UI не должен выдумывать ссылку.
+- API key LLM и PlantNet хранится только в `.env` backend.
+- `document_id` стабилен в пределах корпуса; `chunk_id` имеет вид `<document_id>#chunk-NNN`.
+- `source_ref` (`S1`, `S2`, …) назначается backend для цитирования внутри текущего ответа.
+- `source_url` может быть `null`; frontend не создаёт ссылки самостоятельно.
+- `score` BM25 — ранжирующая величина, не вероятность.
 
-## 2. Поиск документов — `GET /api/v1/search`
+## 2. Health — `GET /api/v1/health`
 
-### Query-параметры
+Возвращает состояние сервиса и размеры корпуса.
 
-| Параметр | Тип | Обязателен | Ограничение |
+```json
+{
+  "status": "ok",
+  "service": "bestiary-of-plants",
+  "corpus": {
+    "documents": 4,
+    "chunks": 4,
+    "indexed_chunks": 4,
+    "indexed_terms": 189,
+    "average_chunk_length": 63.5,
+    "k1": 1.2,
+    "b": 0.75
+  }
+}
+```
+
+Числа выше — пример для текущего seed-корпуса; после изменения данных они изменятся.
+
+## 3. Public config — `GET /api/v1/config`
+
+Показывает frontend только публичные флаги: `llm_configured`, `llm_provider`, модель (только если LLM включена), `agentic_enabled`, лимиты инструментов/контекста, `identification_configured`, retrieval method и статистику корпуса. Секреты и API keys не возвращаются.
+
+## 4. BM25 Search — `GET /api/v1/search`
+
+| Query | Тип | Обязателен | Диапазон |
 |---|---|---|---|
-| `q` | string | Да | После удаления пробелов не пустой |
-| `limit` | integer | Нет | По умолчанию 5; допустимый диапазон 1–10 |
-
-### Пример запроса
+| `q` | string | да | 1–1000 символов, не пустой после trim |
+| `limit` | integer | нет | 1–10, default 5 |
 
 ```http
 GET /api/v1/search?q=венерина%20мухоловка&limit=5
 ```
 
-### Пример ответа `200 OK`
+Успешный ответ: `{ "query": "...", "method": "bm25", "results": [...] }`. У результата есть `document_id`, `chunk_id`, `title`, `scientific_name`, `snippet`, `source_title`, `source_url`, `record_status`, `score`.
+
+## 5. Ask / RAG — `POST /api/v1/ask`
+
+Тело запроса:
 
 ```json
 {
-  "query": "венерина мухоловка",
-  "results": [
-    {
-      "document_id": "plant-0001",
-      "title": "Венерина мухоловка",
-      "scientific_name": "Dionaea muscipula",
-      "snippet": "Краткий фрагмент исходного документа...",
-      "source_title": "Название источника",
-      "source_url": "https://example.org/source",
-      "score": 4.27
-    }
-  ]
+  "query": "Венерина мухоловка ловушка створки",
+  "limit": 5,
+  "agentic": true
 }
 ```
 
-Это пример схемы, а не реальные данные или реальный URL. В коде пример должен быть заменён документами из фактического корпуса.
+`query`: 1–1000 символов; `limit`: 1–10; `agentic`: необязательный bool, если отсутствует — используется `AGENTIC_ENABLED`.
 
-## 3. Вопрос-ответ — `POST /api/v1/ask`
-
-### Тело запроса
+Успешный ответ:
 
 ```json
 {
-  "query": "Чем венерина мухоловка отличается от росянки?",
-  "limit": 5
-}
-```
-
-### Пример ответа `200 OK`
-
-```json
-{
-  "query": "Чем венерина мухоловка отличается от росянки?",
-  "answer": "Ответ формируется на основе найденных документов...",
+  "query": "...",
+  "answer": "... [S1]",
   "status": "answered",
+  "generation_mode": "rag",
   "sources": [
     {
-      "document_id": "plant-0001",
-      "title": "Венерина мухоловка",
+      "source_ref": "S1",
+      "chunk_id": "plant-example#chunk-001",
+      "document_id": "plant-example",
+      "title": "Название растения",
+      "scientific_name": null,
       "source_title": "Название источника",
-      "source_url": "https://example.org/source",
-      "snippet": "Использованный фрагмент..."
+      "source_url": null,
+      "snippet": "...",
+      "score": 1.23,
+      "record_status": "reviewed"
     }
   ],
   "retrieval": {
     "method": "bm25",
-    "returned_documents": 2
+    "initial_results": 1,
+    "total_context_chunks": 1,
+    "tool_calls": 0,
+    "max_tool_calls": 5
   }
 }
 ```
 
-Допустимые значения `status`: `answered`, `insufficient_data`. Если найденных материалов недостаточно, `answer` содержит понятное сообщение об ограничении, а `sources` содержит фактически найденные документы либо пустой массив.
+`generation_mode`: `rag`, `agentic_rag`, `retrieval_only` или `none`. `status`: `answered` или `insufficient_data`. При отсутствии LLM система показывает найденные выдержки с `generation_mode=retrieval_only` — это не генеративный ответ. При отсутствии контекста возвращается честное сообщение, пустые `sources` и `status=insufficient_data`.
 
-## 4. Ошибки
+## 6. Plant profile — `GET /api/v1/plants/{document_id}`
 
-Рекомендуемые коды: `400` — неверный запрос; `422` — запрос не проходит валидацию; `500` — внутренняя ошибка; `503` — временно недоступен поиск или генератор.
+Возвращает исходную запись по стабильному ID. `404` с кодом `PLANT_NOT_FOUND`, если записи нет.
 
-```json
-{
-  "error": {
-    "code": "INVALID_QUERY",
-    "message": "Введите название растения или вопрос."
-  }
-}
-```
+## 7. Image identification — `POST /api/v1/identify`
 
-Пользовательский интерфейс не должен показывать stack trace, переменные окружения или секреты.
+`multipart/form-data`, поле `image` обязательно; query-параметр `organ` допускает `auto|leaf|flower|fruit|bark|habit`.
 
-## 5. Соглашения для результата поиска
+Поддерживаются JPEG и PNG, до 10 МБ по умолчанию. Ответ содержит `status=identified|no_match`, сообщение о предварительном характере результата, `candidates[]` (`scientific_name`, `common_names`, `score`) и `provider=Pl@ntNet`. Score — показатель внешнего сервиса, не гарантия правильности. Endpoint возвращает `503 IDENTIFICATION_NOT_CONFIGURED`, если отсутствует `PLANTNET_API_KEY`.
 
-- `score` необязателен для frontend; если показывается пользователю, его нельзя называть вероятностью правильности.
-- `snippet` — короткая выдержка для оценки релевантности; полный документ не обязательно передавать браузеру.
-- Название источника и URL формируются из метаданных корпуса.
-- Число результатов ограничивается сервером даже при переданном `limit`.
+## 8. Ошибки
 
-## 6. Совместимость
+FastAPI возвращает стандартный формат `detail`; для прикладных ошибок в `detail` содержатся `code` и `message`. Основные статусы:
 
-Перед интеграцией владелец frontend и владелец backend должны подтвердить имена полей, типы и поведение пустой выдачи. После согласования контракт нельзя менять односторонне: изменение требует одновременного обновления реализации, тестов и этого документа.
+- `400` — некорректный файл/пустое изображение;
+- `413` — превышен размер файла;
+- `415` — неподдерживаемый MIME type или сигнатура содержимого не соответствует JPEG/PNG;
+- `422` — ошибка валидации query/body;
+- `404` — карточка не найдена;
+- `502` — внешний сервис распознавания недоступен/вернул ошибку;
+- `503` — фотоидентификация не настроена.
+
+Stack trace, секреты и тело ошибки провайдера пользователю не передаются.
+
+## 9. LLM provider settings
+
+Выбор провайдера выполняется backend конфигурацией, а не произвольным URL из браузера:
+
+- `LLM_PROVIDER=none` — BM25 и выдержки без LLM;
+- `LLM_PROVIDER=ollama` — OpenAI-compatible endpoint Ollama, обычно `http://localhost:11434/v1`;
+- `LLM_PROVIDER=openai_compatible` — любой endpoint с `/v1/chat/completions`; для удалённых endpoint нужен API key, для loopback `localhost`/`127.0.0.1`/`::1` ключ можно оставить пустым (llama.cpp, KoboldCpp).
+
+Вызовы tools делаются только из allowlist backend. Максимум 10 вызовов на запрос.
+
+
+## 10. Deployment boundary
+
+Текущая версия рассчитана на локальный или контролируемый запуск. API не содержит полноценной пользовательской аутентификации, rate limiting и server-side authorization. Не публикуйте backend в открытый интернет без отдельного hardening-этапа.

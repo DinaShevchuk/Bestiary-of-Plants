@@ -628,8 +628,144 @@ body:has(.auth-page) .theme-toggle {
   .msg { max-width: 88%; }
 }
 /* =========================================================
+   RAG / ИСТОЧНИКИ / РАСПОЗНАВАНИЕ ФОТО
+   ========================================================= */
+[hidden] { display: none !important; }
+.composer {
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.composer-inner input { padding-left: 62px; }
+.photo-btn {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .55);
+  color: #2A3328;
+  cursor: pointer;
+  font-size: 19px;
+  z-index: 1;
+}
+.photo-btn:hover { background: rgba(255, 255, 255, .9); }
+.photo-btn:focus-visible, .plant-candidate button:focus-visible,
+.photo-panel button:focus-visible, .send-btn:focus-visible {
+  outline: 3px solid #345f38;
+  outline-offset: 2px;
+}
+.send-btn:disabled, .photo-panel button:disabled {
+  opacity: .55;
+  cursor: wait;
+}
+.service-status {
+  width: 100%;
+  max-width: 780px;
+  padding: 0 8px;
+  color: var(--text-main);
+  opacity: .62;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.photo-panel {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  bottom: calc(100% + 12px);
+  width: min(100%, 480px);
+  display: flex;
+  gap: 13px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--chat-item-bg);
+  color: var(--chat-item-text);
+  box-shadow: var(--shadow);
+}
+.photo-panel img {
+  width: 88px;
+  height: 88px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex: 0 0 auto;
+}
+.photo-panel-info { display: flex; flex-direction: column; gap: 5px; min-width: 0; font-size: 12px; }
+.photo-panel-info strong { overflow-wrap: anywhere; }
+.photo-panel-info span { opacity: .7; }
+.photo-panel-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; }
+.photo-panel-actions button, .plant-candidate button {
+  border: 0;
+  border-radius: 9px;
+  padding: 8px 11px;
+  background: var(--green);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+.photo-panel-actions .secondary-action { background: #e8ece4; color: #293629; }
+.message-text { white-space: pre-wrap; }
+.message-warning, .source-warning {
+  display: block;
+  margin-top: 9px;
+  color: #9a5a17;
+  font-size: 12px;
+}
+.message-meta {
+  display: block;
+  margin-top: 10px;
+  opacity: .58;
+  font-size: 11px;
+}
+.source-list {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(100, 120, 100, .22);
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+.source-list > strong { font-size: 12px; }
+.source-item {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(123, 149, 122, .09);
+}
+.source-item-title { font-weight: 700; }
+.source-item em, .source-item small { opacity: .75; font-size: 11px; }
+.source-item a { color: #477a4b; text-decoration: underline; text-underline-offset: 2px; width: fit-content; }
+.plant-candidates { display: grid; gap: 8px; margin-top: 10px; }
+.plant-candidate {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid rgba(100, 120, 100, .2);
+  border-radius: 12px;
+}
+.plant-candidate em, .plant-candidate small { font-size: 11px; opacity: .7; }
+.plant-candidate button { margin-top: 4px; justify-self: start; }
+
+@media (max-width: 620px) {
+  .composer { padding: 8px 14px 14px; }
+  .service-status { font-size: 10px; }
+  .photo-panel { width: 100%; }
+  .photo-panel img { width: 68px; height: 68px; }
+  .source-list { max-width: 100%; }
+}
+
+.source-snippet { font-size: 11px; line-height: 1.45; opacity: .82; margin-top: 3px; }
+.photo-btn:disabled { opacity: .5; cursor: wait; }
+
+/* =========================================================
    ПАНЕЛЬ АДМИНИСТРАТОРА — ДЕМО-ИНТЕРФЕЙС
    ========================================================= */
+
 .admin-body { overflow: auto; background: var(--bg-page); }
 .admin-body::before { opacity: .16; background-size: 48% auto; background-position: right bottom; }
 .admin-shell { position: relative; z-index: 1; display: flex; min-height: 100vh; }

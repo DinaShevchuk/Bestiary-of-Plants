@@ -1,0 +1,10 @@
+{
+  "version": "smoke-1.0",
+  "description": "Небольшой smoke-набор для демонстрационного корпуса. Не заменяет полный учебный benchmark из 30 документов и 15 вопросов.",
+  "cases": [
+    {"query_id":"S01","query":"венерина мухоловка ловушка створки","expected_doc_ids":["plant-dionaea-001"],"should_abstain":false},
+    {"query_id":"S02","query":"росянка липкие капли насекомые","expected_doc_ids":["plant-drosera-001"],"should_abstain":false},
+    {"query_id":"S03","query":"непентес кувшинчатые ловушки","expected_doc_ids":["plant-nepenthes-001"],"should_abstain":false},
+    {"query_id":"S04","query":"какое комнатное растение лечит диабет","expected_doc_ids":[],"should_abstain":true}
+  ]
+}

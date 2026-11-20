@@ -23,5 +23,6 @@ Thumbs.db
 indexes/
 *.sqlite
 *.db
+*.xlsx
 
 # Keep small, anonymized test fixtures if they are intentionally tracked.

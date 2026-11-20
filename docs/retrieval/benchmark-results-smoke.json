@@ -1,0 +1,75 @@
+{
+  "benchmark_version": "smoke-1.0",
+  "retrieval": "bm25",
+  "corpus": {
+    "documents": 4,
+    "chunks": 4,
+    "indexed_chunks": 4,
+    "indexed_terms": 189,
+    "average_chunk_length": 63.5,
+    "k1": 1.2,
+    "b": 0.75
+  },
+  "k": 5,
+  "mean_recall": 1.0,
+  "mean_precision": 0.20000000000000004,
+  "mrr": 1.0,
+  "correct_abstention_rate": 1.0,
+  "cases": [
+    {
+      "query_id": "S01",
+      "query": "венерина мухоловка ловушка створки",
+      "ranked_doc_ids": [
+        "plant-dionaea-001"
+      ],
+      "expected_doc_ids": [
+        "plant-dionaea-001"
+      ],
+      "recall_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "reciprocal_rank_at_5": 1.0,
+      "abstention_correct": null
+    },
+    {
+      "query_id": "S02",
+      "query": "росянка липкие капли насекомые",
+      "ranked_doc_ids": [
+        "plant-drosera-001",
+        "plant-nepenthes-001"
+      ],
+      "expected_doc_ids": [
+        "plant-drosera-001"
+      ],
+      "recall_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "reciprocal_rank_at_5": 1.0,
+      "abstention_correct": null
+    },
+    {
+      "query_id": "S03",
+      "query": "непентес кувшинчатые ловушки",
+      "ranked_doc_ids": [
+        "plant-nepenthes-001",
+        "plant-dionaea-001"
+      ],
+      "expected_doc_ids": [
+        "plant-nepenthes-001"
+      ],
+      "recall_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "reciprocal_rank_at_5": 1.0,
+      "abstention_correct": null
+    },
+    {
+      "query_id": "S04",
+      "query": "какое комнатное растение лечит диабет",
+      "ranked_doc_ids": [],
+      "expected_doc_ids": [],
+      "recall_at_5": null,
+      "precision_at_5": null,
+      "reciprocal_rank_at_5": null,
+      "abstention_correct": true
+    }
+  ],
+  "note": "Smoke benchmark only; not a full or human-validated evaluation."
+}
