@@ -1,0 +1,10 @@
+---
+description: Общие правила AI coding agent для проекта «Бестиарий растений»
+alwaysApply: true
+---
+
+Перед изменениями прочитай `AGENTS.md`, `docs/ai/PROJECT_CONTEXT.md`, `docs/ai/WORKFLOW.md`, `docs/ai/DEFINITION_OF_DONE.md`.
+
+Текущий стек — HTML/CSS/JS frontend + Python/FastAPI backend. В коде уже реализованы BM25, JSONL loader/chunking, RAG, ограниченный Agentic RAG и API интеграция. LLM (Ollama или OpenAI-compatible) и Pl@ntNet включаются `.env`; live-проверка зависит от доступных сервисов и ключей. Не называй seed corpus научно проверенной базой: все четыре записи `demo_unverified`.
+
+Сохраняй существующий дизайн и архитектуру. Работай по SDD: требование → реализация → проверки → обновление документов. Не выдумывай источники, URL или результаты benchmark. Не добавляй секреты и произвольные tools, не ослабляй лимиты agent loop. Перед завершением запускай доступные проверки и перечисляй реальные результаты/ограничения.
