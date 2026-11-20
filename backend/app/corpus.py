@@ -1,9 +1,11 @@
+
 """Corpus loading and deterministic text chunking for plant records."""
 from __future__ import annotations
 
 import json
 import re
 import sqlite3
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -39,21 +41,30 @@ class PlantDocument:
     @classmethod
     def from_dict(cls, item: dict[str, Any]) -> "PlantDocument":
         required = ("document_id", "plant_name", "content")
-        missing = [name for name in required if not str(item.get(name, "")).strip()]
+        missing = [
+            name for name in required
+            if not str(item.get(name, "")).strip()
+        ]
         if missing:
             raise ValueError(f"Missing required fields: {', '.join(missing)}")
+
         known = {
-            "document_id", "plant_name", "scientific_name", "aliases", "category", "content",
-            "source_title", "source_url", "publisher", "published_at", "accessed_at", "language",
-            "license_or_usage_note", "record_status", "family", "genus", "specific_epithet",
-            "taxonomic_status", "kingdom", "rank", "is_medicinal",
+            "document_id", "plant_name", "scientific_name", "aliases",
+            "category", "content", "source_title", "source_url",
+            "publisher", "published_at", "accessed_at", "language",
+            "license_or_usage_note", "record_status", "family", "genus",
+            "specific_epithet", "taxonomic_status", "kingdom", "rank",
+            "is_medicinal",
         }
+
         aliases = item.get("aliases") or []
         category = item.get("category") or []
+
         if isinstance(aliases, str):
             aliases = [aliases]
         if isinstance(category, str):
             category = [category]
+
         return cls(
             document_id=str(item["document_id"]).strip(),
             plant_name=str(item["plant_name"]).strip(),
@@ -61,13 +72,15 @@ class PlantDocument:
             aliases=tuple(str(x).strip() for x in aliases if str(x).strip()),
             category=tuple(str(x).strip() for x in category if str(x).strip()),
             content=str(item["content"]).strip(),
-            source_title=str(item.get("source_title") or "Источник не указан").strip(),
+            source_title=str(item.get("source_title") or "Источник не указан"),
             source_url=_optional_str(item.get("source_url")),
             publisher=_optional_str(item.get("publisher")),
             published_at=_optional_str(item.get("published_at")),
             accessed_at=_optional_str(item.get("accessed_at")),
-            language=str(item.get("language") or "ru").strip(),
-            license_or_usage_note=_optional_str(item.get("license_or_usage_note")),
+            language=str(item.get("language") or "ru"),
+            license_or_usage_note=_optional_str(
+                item.get("license_or_usage_note")
+            ),
             family=_optional_str(item.get("family")),
             genus=_optional_str(item.get("genus")),
             specific_epithet=_optional_str(item.get("specific_epithet")),
@@ -124,358 +137,641 @@ def _optional_str(value: Any) -> str | None:
 def load_corpus(path: Path) -> list[PlantDocument]:
     if not path.exists():
         return []
-    records: list[PlantDocument] = []
-    seen: set[str] = set()
-    for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+
+    records = []
+    seen = set()
+
+    for line_number, raw in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
+
         try:
             item = json.loads(raw)
             if not isinstance(item, dict):
                 raise ValueError("Each JSONL line must contain a JSON object")
             document = PlantDocument.from_dict(item)
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
-            raise ValueError(f"Invalid corpus record at {path}:{line_number}: {exc}") from exc
+            raise ValueError(
+                f"Invalid corpus record at {path}:{line_number}: {exc}"
+            ) from exc
+
         if document.document_id in seen:
-            raise ValueError(f"Duplicate document_id '{document.document_id}' at line {line_number}")
+            raise ValueError(
+                f"Duplicate document_id '{document.document_id}' "
+                f"at line {line_number}"
+            )
+
         seen.add(document.document_id)
         records.append(document)
+
     return records
 
 
-
 def load_sqlite_corpus(path: Path) -> list[PlantDocument]:
-    """Load searchable records from the project's relational SQLite schema.
+    """Read the Russian Bestiary-of-Plants SQLite database without modifying it."""
 
-    Reads taxonomy from plants and narrative material from documents and
-    plant_descriptions. It does not infer missing facts or invent source URLs.
-    """
     if not path.exists():
-        raise FileNotFoundError(
-            f"SQLite database not found: {path}. Set SQLITE_DB_PATH or place bestiary.db in data/."
-        )
+        raise FileNotFoundError(f"SQLite database not found: {path}")
 
-    def table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    conn = sqlite3.connect(
+        f"file:{path.resolve().as_posix()}?mode=ro",
+        uri=True,
+    )
+    conn.row_factory = sqlite3.Row
+
+    def table_exists(name: str) -> bool:
         return conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (name,),
         ).fetchone() is not None
 
     def safe_json_list(value: Any) -> list[str]:
-        if value is None:
+        if not value:
             return []
         try:
             parsed = json.loads(value) if isinstance(value, str) else value
         except (json.JSONDecodeError, TypeError):
-            return [str(value)] if str(value).strip() else []
+            return [str(value).strip()] if str(value).strip() else []
+
         if isinstance(parsed, str):
-            return [parsed] if parsed.strip() else []
+            return [parsed.strip()] if parsed.strip() else []
         if isinstance(parsed, list):
-            return [str(x).strip() for x in parsed if str(x).strip()]
+            return [
+                str(x).strip() for x in parsed
+                if x is not None and str(x).strip()
+            ]
         return []
 
-    conn = sqlite3.connect(f"file:{path.resolve().as_posix()}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
+    def unique(values: Iterable[Any]) -> list[str]:
+        result = []
+        seen = set()
+        for value in values:
+            if value is None:
+                continue
+            value = str(value).strip()
+            if value and value not in seen:
+                seen.add(value)
+                result.append(value)
+        return result
+
     try:
-        if not table_exists(conn, "plants"):
-            raise ValueError("SQLite schema does not contain required table 'plants'.")
+        if not table_exists("plants"):
+            raise ValueError("В базе отсутствует таблица plants.")
 
-        plants = {int(row["plant_id"]): dict(row) for row in conn.execute("SELECT * FROM plants")}
-        names_by_plant: dict[int, list[dict[str, Any]]] = {}
-        if table_exists(conn, "plant_names"):
-            for row in conn.execute("SELECT * FROM plant_names ORDER BY plant_id, name_type, language, name"):
-                item = dict(row)
-                names_by_plant.setdefault(int(item["plant_id"]), []).append(item)
+        plants = {
+            int(row["plant_id"]): dict(row)
+            for row in conn.execute("SELECT * FROM plants")
+        }
 
-        categories_by_plant: dict[int, list[str]] = {}
-        if table_exists(conn, "plant_categories") and table_exists(conn, "categories"):
-            for row in conn.execute(
-                """SELECT pc.plant_id, c.slug, c.name_ru, c.name_en
-                   FROM plant_categories pc JOIN categories c ON c.category_id=pc.category_id"""
-            ):
+        # Источники
+        sources = {}
+        if table_exists("sources"):
+            sources = {
+                int(row["source_id"]): dict(row)
+                for row in conn.execute("SELECT * FROM sources")
+            }
+
+        def get_source(source_id: Any) -> dict[str, Any]:
+            sid = _optional_int(source_id)
+            return sources.get(sid, {}) if sid is not None else {}
+
+        # Альтернативные названия растений
+        names_by_plant = defaultdict(list)
+
+        if table_exists("plant_names"):
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM plant_names
+                ORDER BY plant_id, name_type, language, name
+                """
+            )
+            for row in rows:
                 item = dict(row)
-                categories_by_plant.setdefault(int(item["plant_id"]), []).extend(
-                    x for x in (item.get("slug"), item.get("name_ru"), item.get("name_en")) if x
+                names_by_plant[int(item["plant_id"])].append(item)
+
+        # Категории
+        categories_by_plant = defaultdict(list)
+
+        if table_exists("plant_categories") and table_exists("categories"):
+            rows = conn.execute(
+                """
+                SELECT pc.plant_id, c.slug, c.name_ru, c.name_en
+                FROM plant_categories pc
+                JOIN categories c
+                    ON c.category_id = pc.category_id
+                """
+            )
+            for row in rows:
+                item = dict(row)
+                categories_by_plant[int(item["plant_id"])].extend(
+                    x for x in (
+                        item.get("name_ru"),
+                        item.get("slug"),
+                        item.get("name_en"),
+                    ) if x
                 )
 
-        sources: dict[int, dict[str, Any]] = {}
-        if table_exists(conn, "sources"):
-            sources = {int(row["source_id"]): dict(row) for row in conn.execute("SELECT * FROM sources")}
+        def plant_identity(plant_id: Any):
+            pid = _optional_int(plant_id)
+            plant = plants.get(pid) if pid is not None else None
 
-        def plant_identity(plant_id: int | None, fallback_name: str | None = None) -> tuple[str, str | None, list[str], list[str], dict[str, Any]]:
-            plant = plants.get(int(plant_id)) if plant_id is not None else None
             if not plant:
-                name = (fallback_name or "Неизвестное растение").strip()
-                return name, None, [], [], {}
-            names = names_by_plant.get(int(plant_id), [])
-            ru_common = [x["name"] for x in names if x.get("name") and (x.get("language") or "").lower().startswith("ru")]
-            common = [x["name"] for x in names if x.get("name") and x.get("name_type", "common") == "common"]
-            all_names = list(dict.fromkeys(x["name"] for x in names if x.get("name")))
-            preferred = (ru_common or common or all_names or [plant.get("scientific_name") or fallback_name or f"Растение {plant_id}"])[0]
-            aliases = [x for x in all_names if x != preferred]
-            categories = list(dict.fromkeys(categories_by_plant.get(int(plant_id), [])))
-            return str(preferred), plant.get("scientific_name"), aliases, categories, plant
+                return (
+                    "Неизвестное растение", None, [], [], {},
+                )
+
+            names = names_by_plant.get(pid, [])
+
+            russian_names = []
+            other_names = []
+
+            for item in names:
+                name = item.get("name_ru")
+                if name:
+                    russian_names.append(name)
+
+                language = str(item.get("language") or "").lower()
+                original_name = item.get("name")
+
+                if original_name:
+                    if language.startswith("ru"):
+                        russian_names.append(original_name)
+                    else:
+                        other_names.append(original_name)
+
+            preferred = (
+                _optional_str(plant.get("name_ru"))
+                or next(iter(unique(russian_names)), None)
+                or _optional_str(plant.get("scientific_name"))
+                or f"Растение {pid}"
+            )
+
+            aliases = unique([
+                *russian_names,
+                *other_names,
+                plant.get("scientific_name"),
+            ])
+            aliases = [x for x in aliases if x != preferred]
+
+            categories = unique(categories_by_plant.get(pid, []))
+
+            return (
+                preferred,
+                plant.get("scientific_name"),
+                aliases,
+                categories,
+                plant,
+            )
 
         records: list[PlantDocument] = []
 
-        # A taxonomy-only card makes scientific names/families searchable, but
-        # explicitly states that it contains no pharmacological/safety evidence.
+        # 1. Таксономические записи
         for plant_id, plant in plants.items():
-            plant_name, scientific_name, aliases, categories, _ = plant_identity(plant_id)
-            fields = [
-                ("Научное название", scientific_name),
-                ("Авторство научного названия", plant.get("scientific_name_authorship")),
-                ("Семейство", plant.get("family")),
-                ("Род", plant.get("genus")),
-                ("Видовой эпитет", plant.get("specific_epithet")),
-                ("Таксономический статус", plant.get("taxonomic_status")),
-                ("Царство", plant.get("kingdom")),
-                ("Ранг", plant.get("rank")),
-            ]
-            content = "Таксономическая запись. " + "; ".join(f"{label}: {value}" for label, value in fields if value not in (None, "")) + ". "
-            medicinal = plant.get("is_medicinal")
-            content += (
-                f"Флаг is_medicinal: {medicinal}. Это только значение классификационного поля исходного набора; "
-                "оно не подтверждает лечебную эффективность, безопасность, дозировку или способ применения. "
+            name, scientific, aliases, categories, _ = plant_identity(
+                plant_id
             )
-            if plant.get("description"):
-                content += "Описание из поля plants.description: " + str(plant["description"])
-            content += "В этой записи нет подтверждённых сведений о токсичности, съедобности, применении или противопоказаниях, если они не приведены отдельно в источниках."
-            source_id = plant.get("description_source_id")
-            source = sources.get(int(source_id)) if source_id else None
+
+            family = plant.get("family_ru") or plant.get("family")
+            description = plant.get("description_ru") or plant.get("description")
+
+            fields = [
+                f"Научное название: {scientific or ''}",
+                f"Семейство: {family or ''}",
+                f"Род: {plant.get('genus') or ''}",
+                f"Видовой эпитет: {plant.get('specific_epithet') or ''}",
+                f"Таксономический статус: {plant.get('taxonomic_status') or ''}",
+            ]
+
+            content = ". ".join(x for x in fields if not x.endswith(": "))
+            if description:
+                content += ". Описание: " + str(description)
+
+            content += (
+                ". Поле medicinal не подтверждает лечебную эффективность, "
+                "безопасность или дозировку."
+            )
+
+            source = get_source(plant.get("description_source_id"))
+
             records.append(PlantDocument(
                 document_id=f"plant-taxonomy-{plant_id}",
-                plant_name=plant_name,
-                scientific_name=scientific_name,
+                plant_name=name,
+                scientific_name=scientific,
                 aliases=tuple(aliases),
                 category=tuple(categories),
                 content=content,
-                source_title=(source or {}).get("title") or f"Таксономическая запись ({plant.get('data_status') or 'taxonomy_only'})",
-                source_url=(source or {}).get("source_url"),
-                publisher=(source or {}).get("publisher"),
-                accessed_at=(source or {}).get("accessed_at"),
-                language=plant.get("description_language") or "en",
-                license_or_usage_note=(source or {}).get("license_note") or "Таксономические поля; первичная ссылка и лицензия не указаны в записи.",
-                family=plant.get("family"), genus=plant.get("genus"),
-                specific_epithet=plant.get("specific_epithet"), taxonomic_status=plant.get("taxonomic_status"),
-                kingdom=plant.get("kingdom"), rank=plant.get("rank"), is_medicinal=medicinal,
+                source_title=(
+                    source.get("title_ru")
+                    or source.get("title")
+                    or "Таксономическая запись"
+                ),
+                source_url=source.get("source_url"),
+                publisher=source.get("publisher"),
+                accessed_at=source.get("accessed_at"),
+                language="ru",
+                license_or_usage_note=source.get("license_note"),
+                family=family,
+                genus=plant.get("genus"),
+                specific_epithet=plant.get("specific_epithet"),
+                taxonomic_status=plant.get("taxonomic_status"),
+                kingdom=plant.get("kingdom"),
+                rank=plant.get("rank"),
+                is_medicinal=plant.get("is_medicinal"),
                 record_status="taxonomy_only",
-                extra={"plant_id": plant_id, "data_status": plant.get("data_status"), "source_id": source_id},
+                extra={
+                    "plant_id": plant_id,
+                    "data_status": plant.get("data_status"),
+                    "source_id": plant.get("description_source_id"),
+                },
             ))
 
-        if table_exists(conn, "documents"):
-            for row in conn.execute("SELECT * FROM documents ORDER BY document_id"):
-                item = dict(row)
-                plant_id = item.get("plant_id")
-                plant_name, taxonomy_name, db_aliases, db_categories, plant = plant_identity(plant_id, item.get("plant_name"))
-                source = sources.get(int(item["source_id"])) if item.get("source_id") is not None else {}
-                aliases = list(dict.fromkeys([*db_aliases, *safe_json_list(item.get("aliases_json"))]))
-                categories = list(dict.fromkeys([*db_categories, *safe_json_list(item.get("categories_json"))]))
-                records.append(PlantDocument(
-                    document_id=str(item["document_id"]),
-                    plant_name=str(item.get("plant_name") or plant_name),
-                    scientific_name=item.get("scientific_name") or taxonomy_name,
-                    aliases=tuple(aliases), category=tuple(categories),
-                    content=str(item.get("content") or ""),
-                    source_title=str(item.get("source_title") or (source or {}).get("title") or "Источник не указан"),
-                    source_url=item.get("source_url") or (source or {}).get("source_url"),
-                    publisher=item.get("publisher") or (source or {}).get("publisher"),
-                    published_at=item.get("published_at"),
-                    accessed_at=item.get("accessed_at") or (source or {}).get("accessed_at"),
-                    language=item.get("language") or "en",
-                    license_or_usage_note=item.get("license_or_usage_note") or (source or {}).get("license_note"),
-                    family=(plant or {}).get("family"), genus=(plant or {}).get("genus"),
-                    specific_epithet=(plant or {}).get("specific_epithet"),
-                    taxonomic_status=(plant or {}).get("taxonomic_status"), kingdom=(plant or {}).get("kingdom"),
-                    rank=(plant or {}).get("rank"), is_medicinal=(plant or {}).get("is_medicinal"),
-                    record_status="source_document",
-                    extra={"plant_id": plant_id, "source_id": item.get("source_id"),
-                           "parent_document_id": item.get("parent_document_id"), "chunk_index": item.get("chunk_index")},
-                ))
-
-        if table_exists(conn, "plant_descriptions"):
-            query = "SELECT * FROM plant_descriptions ORDER BY description_id"
-            for row in conn.execute(query):
-                item = dict(row)
-                plant_id = int(item["plant_id"])
-                plant_name, scientific_name, aliases, categories, plant = plant_identity(plant_id)
-                source = sources.get(int(item["source_id"])) if item.get("source_id") is not None else {}
-                section = str(item.get("section") or "Описание")
-                records.append(PlantDocument(
-                    document_id=f"plant-description-{item['description_id']}",
-                    plant_name=plant_name, scientific_name=scientific_name,
-                    aliases=tuple(aliases), category=tuple(categories),
-                    content=f"Раздел: {section}. {item.get('content') or ''}",
-                    source_title=(source or {}).get("title") or f"Описание растения: {section}",
-                    source_url=(source or {}).get("source_url"),
-                    publisher=(source or {}).get("publisher"),
-                    accessed_at=(source or {}).get("accessed_at"),
-                    language=item.get("language") or "ru",
-                    license_or_usage_note=(source or {}).get("license_note"),
-                    family=(plant or {}).get("family"), genus=(plant or {}).get("genus"),
-                    specific_epithet=(plant or {}).get("specific_epithet"),
-                    taxonomic_status=(plant or {}).get("taxonomic_status"), kingdom=(plant or {}).get("kingdom"),
-                    rank=(plant or {}).get("rank"), is_medicinal=(plant or {}).get("is_medicinal"),
-                    record_status=str(item.get("evidence_level") or "source_reported"),
-                    extra={"plant_id": plant_id, "section": section, "source_id": item.get("source_id"),
-                           "source_reference": item.get("source_reference")},
-                ))
-
-        if table_exists(conn, "plant_uses"):
-            for row in conn.execute("SELECT * FROM plant_uses ORDER BY plant_use_id"):
-                item = dict(row)
-                plant_id = int(item["plant_id"])
-                plant_name, scientific_name, aliases, categories, plant = plant_identity(plant_id)
-                source = sources.get(int(item["source_id"])) if item.get("source_id") is not None else {}
-                fields = [f"Заявленное/описанное использование в источнике: {item.get('use_text') or ''}"]
-                if item.get("use_type"):
-                    fields.append(f"Тип использования: {item['use_type']}")
-                if item.get("evidence_type"):
-                    fields.append(f"Тип свидетельства в записи: {item['evidence_type']}")
-                records.append(PlantDocument(
-                    document_id=f"plant-use-{item['plant_use_id']}",
-                    plant_name=plant_name, scientific_name=scientific_name,
-                    aliases=tuple(aliases), category=tuple(categories), content=". ".join(fields) + ".",
-                    source_title=(source or {}).get("title") or "Источник для записи об использовании не указан",
-                    source_url=(source or {}).get("source_url"), publisher=(source or {}).get("publisher"),
-                    accessed_at=(source or {}).get("accessed_at"),
-                    license_or_usage_note=(source or {}).get("license_note"),
-                    family=(plant or {}).get("family"), genus=(plant or {}).get("genus"),
-                    specific_epithet=(plant or {}).get("specific_epithet"),
-                    taxonomic_status=(plant or {}).get("taxonomic_status"), kingdom=(plant or {}).get("kingdom"),
-                    rank=(plant or {}).get("rank"), is_medicinal=(plant or {}).get("is_medicinal"),
-                    record_status="source_reported",
-                    extra={"plant_id": plant_id, "use_type": item.get("use_type"),
-                           "evidence_type": item.get("evidence_type"), "source_id": item.get("source_id"),
-                           "source_reference": item.get("source_reference")},
-                ))
-
-        if table_exists(conn, "plant_compounds") and table_exists(conn, "compounds"):
+        # 2. Основные русскоязычные документы
+        if table_exists("documents_ru"):
             for row in conn.execute(
-                """SELECT pc.*, c.name AS compound_name, c.normalized_name, c.cas_number
-                   FROM plant_compounds pc JOIN compounds c ON c.compound_id=pc.compound_id
-                   ORDER BY pc.plant_id, c.name"""
+                "SELECT * FROM documents_ru ORDER BY document_id"
             ):
                 item = dict(row)
-                plant_id = int(item["plant_id"])
-                plant_name, scientific_name, aliases, categories, plant = plant_identity(plant_id)
-                source = sources.get(int(item["source_id"])) if item.get("source_id") is not None else {}
-                compound_parts = [f"Соединение, указанное в источнике: {item.get('compound_name') or ''}"]
-                if item.get("normalized_name"):
-                    compound_parts.append(f"Нормализованное название: {item['normalized_name']}")
-                if item.get("cas_number"):
-                    compound_parts.append(f"CAS: {item['cas_number']}")
-                if item.get("plant_part"):
-                    compound_parts.append(f"Часть растения: {item['plant_part']}")
-                low, high = item.get("concentration_low_ppm"), item.get("concentration_high_ppm")
-                if low is not None or high is not None:
-                    if low is not None and high is not None:
-                        concentration = f"{low}–{high} ppm"
-                    else:
-                        concentration = f"{low if low is not None else high} ppm"
-                    compound_parts.append(f"Указанная концентрация: {concentration}")
-                if item.get("compound_class"):
-                    compound_parts.append(f"Класс соединения: {item['compound_class']}")
+                pid = item.get("plant_id")
+                name, scientific, aliases, categories, plant = (
+                    plant_identity(pid)
+                )
+
+                source = get_source(item.get("source_id"))
+
+                aliases = unique([
+                    *aliases,
+                    *safe_json_list(item.get("aliases_json")),
+                ])
+                categories = unique([
+                    *categories,
+                    *safe_json_list(item.get("categories_json")),
+                    *safe_json_list(item.get("categories_ru")),
+                ])
+
+                content = str(item.get("content") or "").strip()
+                if not content:
+                    continue
+
                 records.append(PlantDocument(
-                    document_id=f"plant-compound-{plant_id}-{item['compound_id']}-{item.get('source_id')}-{len(records)}",
-                    plant_name=plant_name, scientific_name=scientific_name,
-                    aliases=tuple(aliases), category=tuple(categories), content=". ".join(compound_parts) + ".",
-                    source_title=(source or {}).get("title") or "Источник данных о соединении не указан",
-                    source_url=(source or {}).get("source_url"), publisher=(source or {}).get("publisher"),
-                    accessed_at=(source or {}).get("accessed_at"),
-                    license_or_usage_note=(source or {}).get("license_note"),
-                    family=(plant or {}).get("family"), genus=(plant or {}).get("genus"),
+                    document_id=f"document-ru-{item['document_id']}",
+                    plant_name=item.get("plant_name_ru") or name,
+                    scientific_name=item.get("scientific_name") or scientific,
+                    aliases=tuple(aliases),
+                    category=tuple(categories),
+                    content=content,
+                    source_title=(
+                        item.get("source_title")
+                        or source.get("title_ru")
+                        or source.get("title")
+                        or "Источник не указан"
+                    ),
+                    source_url=item.get("source_url") or source.get("source_url"),
+                    publisher=item.get("publisher") or source.get("publisher"),
+                    accessed_at=item.get("accessed_at") or source.get("accessed_at"),
+                    language=item.get("language") or "ru",
+                    license_or_usage_note=(
+                        item.get("license_or_usage_note")
+                        or source.get("license_note")
+                    ),
+                    family=(plant or {}).get("family_ru") or (plant or {}).get("family"),
+                    genus=(plant or {}).get("genus"),
                     specific_epithet=(plant or {}).get("specific_epithet"),
-                    taxonomic_status=(plant or {}).get("taxonomic_status"), kingdom=(plant or {}).get("kingdom"),
-                    rank=(plant or {}).get("rank"), is_medicinal=(plant or {}).get("is_medicinal"),
-                    record_status="source_reported",
-                    extra={"plant_id": plant_id, "compound_id": item.get("compound_id"),
-                           "compound_name": item.get("compound_name"), "plant_part": item.get("plant_part"),
-                           "source_id": item.get("source_id"), "source_reference": item.get("source_reference")},
+                    taxonomic_status=(plant or {}).get("taxonomic_status"),
+                    kingdom=(plant or {}).get("kingdom"),
+                    rank=(plant or {}).get("rank"),
+                    is_medicinal=(plant or {}).get("is_medicinal"),
+                    record_status="source_document",
+                    extra={
+                        "plant_id": pid,
+                        "source_id": item.get("source_id"),
+                        "original_document_id": item.get("original_document_id"),
+                    },
                 ))
 
-        if table_exists(conn, "habitats"):
-            for row in conn.execute("SELECT * FROM habitats ORDER BY habitat_id"):
+        # 3. Описания
+        if table_exists("plant_descriptions"):
+            for row in conn.execute(
+                "SELECT * FROM plant_descriptions ORDER BY description_id"
+            ):
                 item = dict(row)
-                plant_id = int(item["plant_id"])
-                plant_name, scientific_name, aliases, categories, plant = plant_identity(plant_id)
-                source = sources.get(int(item["source_id"])) if item.get("source_id") is not None else {}
-                fields = [f"Описание местообитания из источника: {item.get('habitat_description') or ''}"]
-                if item.get("locality"):
-                    fields.append(f"Локалитет: {item['locality']}")
-                if item.get("country_code"):
-                    fields.append(f"Код страны: {item['country_code']}")
+                pid = item.get("plant_id")
+
+                language = str(item.get("language") or "").lower()
+                if language and not language.startswith("ru"):
+                    continue
+
+                name, scientific, aliases, categories, plant = (
+                    plant_identity(pid)
+                )
+
+                description = str(item.get("content") or "").strip()
+                if not description:
+                    continue
+
+                section = item.get("section") or "Описание"
+                source = get_source(item.get("source_id"))
+
+                records.append(PlantDocument(
+                    document_id=f"plant-description-{item['description_id']}",
+                    plant_name=name,
+                    scientific_name=scientific,
+                    aliases=tuple(aliases),
+                    category=tuple(categories),
+                    content=f"Раздел: {section}. {description}",
+                    source_title=(
+                        source.get("title_ru")
+                        or source.get("title")
+                        or f"Описание растения: {section}"
+                    ),
+                    source_url=source.get("source_url"),
+                    publisher=source.get("publisher"),
+                    accessed_at=source.get("accessed_at"),
+                    language="ru",
+                    license_or_usage_note=source.get("license_note"),
+                    family=(plant or {}).get("family_ru") or (plant or {}).get("family"),
+                    genus=(plant or {}).get("genus"),
+                    specific_epithet=(plant or {}).get("specific_epithet"),
+                    taxonomic_status=(plant or {}).get("taxonomic_status"),
+                    kingdom=(plant or {}).get("kingdom"),
+                    rank=(plant or {}).get("rank"),
+                    is_medicinal=(plant or {}).get("is_medicinal"),
+                    record_status=str(item.get("evidence_level") or "source_reported"),
+                    extra={
+                        "plant_id": pid,
+                        "section": section,
+                        "source_id": item.get("source_id"),
+                        "source_reference": item.get("source_reference"),
+                    },
+                ))
+
+        # 4. Применения: группируем по растению
+        uses_by_plant = defaultdict(list)
+
+        if table_exists("plant_uses"):
+            for row in conn.execute(
+                "SELECT * FROM plant_uses ORDER BY plant_use_id"
+            ):
+                item = dict(row)
+                pid = _optional_int(item.get("plant_id"))
+                if pid is None:
+                    continue
+
+                use_text = (
+                    item.get("use_text_ru")
+                    or item.get("activity_ru")
+                    or item.get("use_text")
+                    or item.get("activity_en")
+                )
+
+                if not use_text:
+                    continue
+
+                parts = [str(use_text)]
+                if item.get("use_type"):
+                    parts.append(f"Тип: {item['use_type']}")
+                if item.get("evidence_type"):
+                    parts.append(f"Тип свидетельства: {item['evidence_type']}")
+                if item.get("country_ru"):
+                    parts.append(f"Страна: {item['country_ru']}")
+                if item.get("local_name"):
+                    parts.append(f"Местное название: {item['local_name']}")
+
+                source = get_source(item.get("source_id"))
+                source_info = source.get("title_ru") or source.get("title")
+
+                if source_info:
+                    parts.append(f"Источник: {source_info}")
+                if item.get("source_reference"):
+                    parts.append(f"Библиографическая ссылка: {item['source_reference']}")
+
+                uses_by_plant[pid].append(". ".join(parts))
+
+        for pid, descriptions in uses_by_plant.items():
+            name, scientific, aliases, categories, plant = plant_identity(pid)
+
+            records.append(PlantDocument(
+                document_id=f"plant-uses-{pid}",
+                plant_name=name,
+                scientific_name=scientific,
+                aliases=tuple(aliases),
+                category=tuple(categories),
+                content="Сведения об описанных применениях растения:\n"
+                        + "\n".join(descriptions),
+                source_title="Сведения о применении из базы данных",
+                language="ru",
+                family=(plant or {}).get("family_ru") or (plant or {}).get("family"),
+                genus=(plant or {}).get("genus"),
+                specific_epithet=(plant or {}).get("specific_epithet"),
+                is_medicinal=(plant or {}).get("is_medicinal"),
+                record_status="source_reported",
+                extra={"plant_id": pid, "use_count": len(descriptions)},
+            ))
+
+        # 5. Химические соединения: группируем по растению
+        compounds_by_plant = defaultdict(list)
+
+        if table_exists("plant_compounds") and table_exists("compounds"):
+            query = """
+                SELECT
+                    pc.*,
+                    c.name,
+                    c.name_ru,
+                    c.normalized_name,
+                    c.cas_number
+                FROM plant_compounds pc
+                JOIN compounds c ON c.compound_id = pc.compound_id
+                ORDER BY pc.plant_id, pc.compound_id
+            """
+
+            for row in conn.execute(query):
+                item = dict(row)
+                pid = _optional_int(item.get("plant_id"))
+                if pid is None:
+                    continue
+
+                compound_name = (
+                    item.get("name_ru")
+                    or item.get("name")
+                    or item.get("normalized_name")
+                )
+                if not compound_name:
+                    continue
+
+                parts = [str(compound_name)]
+
+                if item.get("plant_part_ru") or item.get("plant_part"):
+                    parts.append(
+                        f"Часть растения: "
+                        f"{item.get('plant_part_ru') or item.get('plant_part')}"
+                    )
+
+                if item.get("compound_class_ru") or item.get("compound_class"):
+                    parts.append(
+                        f"Класс: "
+                        f"{item.get('compound_class_ru') or item.get('compound_class')}"
+                    )
+
+                low = item.get("concentration_low_ppm")
+                high = item.get("concentration_high_ppm")
+
+                if low is not None or high is not None:
+                    parts.append(f"Концентрация: {low}–{high} ppm")
+
+                if item.get("cas_number"):
+                    parts.append(f"CAS: {item['cas_number']}")
+
+                compounds_by_plant[pid].append("; ".join(parts))
+
+        for pid, compounds_list in compounds_by_plant.items():
+            name, scientific, aliases, categories, plant = plant_identity(pid)
+
+            records.append(PlantDocument(
+                document_id=f"plant-compounds-{pid}",
+                plant_name=name,
+                scientific_name=scientific,
+                aliases=tuple(aliases),
+                category=tuple(categories),
+                content="Химические соединения, указанные в базе:\n"
+                        + "\n".join(compounds_list),
+                source_title="Сведения о химических соединениях",
+                language="ru",
+                family=(plant or {}).get("family_ru") or (plant or {}).get("family"),
+                genus=(plant or {}).get("genus"),
+                specific_epithet=(plant or {}).get("specific_epithet"),
+                record_status="source_reported",
+                extra={
+                    "plant_id": pid,
+                    "compound_count": len(compounds_list),
+                },
+            ))
+
+        # 6. Места произрастания
+        if table_exists("habitats"):
+            for row in conn.execute(
+                "SELECT * FROM habitats ORDER BY habitat_id"
+            ):
+                item = dict(row)
+                pid = item.get("plant_id")
+                name, scientific, aliases, categories, plant = (
+                    plant_identity(pid)
+                )
+
+                fields = [
+                    item.get("habitat_description"),
+                    f"Местность: {item['locality']}" if item.get("locality") else None,
+                    f"Код страны: {item['country_code']}" if item.get("country_code") else None,
+                ]
+                content = ". ".join(str(x) for x in fields if x)
+
+                if not content:
+                    continue
+
+                source = get_source(item.get("source_id"))
+
                 records.append(PlantDocument(
                     document_id=f"plant-habitat-{item['habitat_id']}",
-                    plant_name=plant_name, scientific_name=scientific_name,
-                    aliases=tuple(aliases), category=tuple(categories), content=". ".join(fields) + ".",
-                    source_title=(source or {}).get("title") or "Источник данных о местообитании не указан",
-                    source_url=(source or {}).get("source_url"), publisher=(source or {}).get("publisher"),
-                    accessed_at=(source or {}).get("accessed_at"),
-                    license_or_usage_note=(source or {}).get("license_note"),
-                    family=(plant or {}).get("family"), genus=(plant or {}).get("genus"),
-                    specific_epithet=(plant or {}).get("specific_epithet"),
-                    taxonomic_status=(plant or {}).get("taxonomic_status"), kingdom=(plant or {}).get("kingdom"),
-                    rank=(plant or {}).get("rank"), is_medicinal=(plant or {}).get("is_medicinal"),
+                    plant_name=name,
+                    scientific_name=scientific,
+                    aliases=tuple(aliases),
+                    category=tuple(categories),
+                    content=content,
+                    source_title=(
+                        source.get("title_ru")
+                        or source.get("title")
+                        or "Источник о местообитании"
+                    ),
+                    source_url=source.get("source_url"),
+                    publisher=source.get("publisher"),
+                    accessed_at=source.get("accessed_at"),
+                    language="ru",
+                    family=(plant or {}).get("family_ru") or (plant or {}).get("family"),
+                    genus=(plant or {}).get("genus"),
                     record_status="source_reported",
-                    extra={"plant_id": plant_id, "locality": item.get("locality"),
-                           "country_code": item.get("country_code"), "source_id": item.get("source_id"),
-                           "source_reference": item.get("source_reference")},
+                    extra={
+                        "plant_id": pid,
+                        "source_id": item.get("source_id"),
+                        "source_reference": item.get("source_reference"),
+                    },
                 ))
 
-        # A project may export only a schema with no row data. Fail clearly rather
-        # than silently using an unrelated JSONL demo corpus.
         if not records:
             raise ValueError(
-                "SQLite database contains no plant rows/documents/descriptions. "
-                "Check whether bestiary.db has been populated."
+                "Не удалось загрузить записи из SQLite. "
+                "Проверь структуру базы и SQLITE_DB_PATH."
             )
 
-        # Duplicate IDs can occur if the database has multiple duplicate rows; detect them.
-        seen: set[str] = set()
+        seen = set()
         for record in records:
             if record.document_id in seen:
-                raise ValueError(f"Duplicate document_id in SQLite corpus: {record.document_id}")
+                raise ValueError(
+                    f"Duplicate document_id: {record.document_id}"
+                )
             seen.add(record.document_id)
+
         return records
+
     finally:
         conn.close()
 
 
-def load_configured_corpus(data_source: str, data_file: Path, sqlite_db_path: Path) -> list[PlantDocument]:
-    """Load corpus from the selected configured source."""
-    if data_source == "sqlite":
+def load_configured_corpus(
+    data_source: str,
+    data_file: Path,
+    sqlite_db_path: Path,
+) -> list[PlantDocument]:
+    if data_source.lower() == "sqlite":
         return load_sqlite_corpus(sqlite_db_path)
     return load_corpus(data_file)
 
-def chunk_document(document: PlantDocument, max_chars: int = 900, overlap_chars: int = 120) -> list[dict[str, Any]]:
-    """Split content on sentence/paragraph boundaries and carry small overlap."""
+
+def chunk_document(
+    document: PlantDocument,
+    max_chars: int = 900,
+    overlap_chars: int = 120,
+) -> list[dict[str, Any]]:
     text = re.sub(r"\s+", " ", document.content).strip()
     if not text:
         return []
-    sentences = [part.strip() for part in SENTENCE_SPLIT.split(text) if part.strip()]
-    chunks: list[str] = []
+
+    sentences = [
+        part.strip()
+        for part in SENTENCE_SPLIT.split(text)
+        if part.strip()
+    ]
+
+    chunks = []
     current = ""
+
     for sentence in sentences:
         if len(sentence) > max_chars:
             if current:
                 chunks.append(current)
                 current = ""
-            for start in range(0, len(sentence), max(1, max_chars - overlap_chars)):
+
+            step = max(1, max_chars - overlap_chars)
+            for start in range(0, len(sentence), step):
                 piece = sentence[start:start + max_chars].strip()
                 if piece:
                     chunks.append(piece)
             continue
+
         candidate = f"{current} {sentence}".strip() if current else sentence
+
         if current and len(candidate) > max_chars:
             chunks.append(current)
             tail = current[-overlap_chars:].strip() if overlap_chars else ""
             current = f"{tail} {sentence}".strip() if tail else sentence
         else:
             current = candidate
+
     if current:
         chunks.append(current)
 
-    result: list[dict[str, Any]] = []
+    result = []
+
     for index, chunk in enumerate(chunks, start=1):
         result.append({
             "chunk_id": f"{document.document_id}#chunk-{index:03d}",
@@ -499,11 +795,22 @@ def chunk_document(document: PlantDocument, max_chars: int = 900, overlap_chars:
             "is_medicinal": document.is_medicinal,
             "extra": dict(document.extra),
         })
+
     return result
 
 
-def build_chunks(documents: Iterable[PlantDocument], max_chars: int = 900, overlap_chars: int = 120) -> list[dict[str, Any]]:
-    chunks: list[dict[str, Any]] = []
+def build_chunks(
+    documents: Iterable[PlantDocument],
+    max_chars: int = 900,
+    overlap_chars: int = 120,
+) -> list[dict[str, Any]]:
+    chunks = []
     for document in documents:
-        chunks.extend(chunk_document(document, max_chars=max_chars, overlap_chars=overlap_chars))
+        chunks.extend(
+            chunk_document(
+                document,
+                max_chars=max_chars,
+                overlap_chars=overlap_chars,
+            )
+        )
     return chunks
