@@ -628,7 +628,6 @@ body:has(.auth-page) .theme-toggle {
   .msg { max-width: 88%; }
 }
 /* =========================================================
-<<<<<<< HEAD
    RAG / ИСТОЧНИКИ / РАСПОЗНАВАНИЕ ФОТО
    ========================================================= */
 [hidden] { display: none !important; }
@@ -762,9 +761,11 @@ body:has(.auth-page) .theme-toggle {
 
 .source-snippet { font-size: 11px; line-height: 1.45; opacity: .82; margin-top: 3px; }
 .photo-btn:disabled { opacity: .5; cursor: wait; }
-=======
+
+/* =========================================================
    ПАНЕЛЬ АДМИНИСТРАТОРА — ДЕМО-ИНТЕРФЕЙС
    ========================================================= */
+
 .admin-body { overflow: auto; background: var(--bg-page); }
 .admin-body::before { opacity: .16; background-size: 48% auto; background-position: right bottom; }
 .admin-shell { position: relative; z-index: 1; display: flex; min-height: 100vh; }
@@ -864,4 +865,3 @@ body:has(.auth-page) .theme-toggle {
 .chat-demo-notice { position: absolute; top: 15px; right: 22px; max-width: 390px; padding: 8px 12px; border: 1px solid rgba(123,149,122,.2); border-radius: 9px; background: rgba(245,252,236,.88); color: #71836d; font-size: 10px; text-align: center; z-index: 2; }
 .chat-main { position: relative; }
 @media (max-width: 650px) { .chat-demo-notice { position: static; margin: 10px 12px 0; max-width: none; } }
->>>>>>> upstream/main
