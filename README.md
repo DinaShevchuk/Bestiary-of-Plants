@@ -1,7 +1,7 @@
-# Бестиарий растений
+# Flora — Бестиарий растений
 
-**Тип проекта:** веб-справочник с BM25-поиском, RAG-ответами и дополнительным поиском по запросу LLM.  
-**Статус:** первый работающий backend и связанный с ним интерфейс реализованы; базовый корпус демонстрационный и требует фактчекинга.  
+**Тип проекта:** учебный веб-справочник с BM25-поиском, RAG-ответами, дополнительным поиском по запросу LLM и демонстрационной административной панелью.
+**Статус:** первый работающий backend и связанный с ним интерфейс реализованы; административная панель работает в демонстрационном режиме; базовый корпус демонстрационный и требует фактчекинга.
 **Версия реализации:** 1.1.0
 
 ## 1. Что уже работает
@@ -16,6 +16,10 @@
 - [x] Единый OpenAI-compatible LLM-клиент для Ollama, облачных API и локальных GGUF-серверов llama.cpp/KoboldCpp. Локальные loopback endpoints не требуют фиктивного API key.
 - [x] UI показывает ожидание, ошибки, источники и сохраняет историю чатов в `localStorage`.
 - [x] Опциональная фотоидентификация через Pl@ntNet API — без обучения собственной модели; пользователь выбирает один из вариантов, после чего выполняется поиск в локальном корпусе.
+- [x] Демонстрационная административная панель (`admin.html`): обзор проекта, список пользователей, каталог растений и история демонстрационных чатов.
+- [x] Управление демонстрационными пользователями: добавление, редактирование, поиск, блокировка и удаление.
+- [x] Управление демонстрационными карточками растений: добавление, редактирование, поиск и удаление.
+- [x] Локальное сохранение данных административной панели в `localStorage`.
 - [x] Автотесты BM25, загрузки корпуса, RAG-сценариев, ограниченного вызова инструмента и HTTP API.
 - [x] Smoke benchmark с результатами в `docs/retrieval/benchmark-results-smoke.json`.
 
@@ -54,16 +58,27 @@ BM25 score — величина для ранжирования, **не веро
 
 ```bash
 python -m venv .venv
+
 # macOS / Linux
 source .venv/bin/activate
+
 # Windows PowerShell: .venv\Scripts\Activate.ps1
 
 python -m pip install -r requirements.txt
 cp .env.example .env        # Windows: copy .env.example .env
+
 python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Откройте `http://127.0.0.1:8000/`. Документация OpenAPI доступна по `http://127.0.0.1:8000/docs`, health-check — `/api/v1/health`.
+Откройте в браузере:
+
+- Главная страница: [http://127.0.0.1:8000/](http://127.0.0.1:8000/)
+- Панель администратора: [http://127.0.0.1:8000/admin.html](http://127.0.0.1:8000/admin.html)
+- Вход: [http://127.0.0.1:8000/login.html](http://127.0.0.1:8000/login.html)
+- Регистрация: [http://127.0.0.1:8000/register.html](http://127.0.0.1:8000/register.html)
+- Документация OpenAPI: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+
+Health-check доступен по адресу `/api/v1/health`.
 
 Запуск только статического HTML через `python -m http.server` больше не является полным режимом: в нём не работает API, поиск, LLM и фотоидентификация. Для интегрированного приложения запускайте FastAPI-сервер.
 
@@ -108,7 +123,7 @@ AGENT_MAX_TOOL_CALLS=5
 
 ### Вариант C — существующие GGUF из Faraday (llama.cpp server)
 
-Файлы из `C:\Users\user\AppData\Roaming\faraday\models` можно использовать напрямую: копировать их в папку проекта не требуется. Сам путь к `.gguf` не указывается в `.env` приложения. Сначала отдельный inference-сервер загружает файл и предоставляет OpenAI-compatible endpoint.
+Файлы из `C:\Users\user\AppData\Roaming\faraday\models\` можно использовать напрямую: копировать их в папку проекта не требуется. Сам путь к `.gguf` не указывается в `.env` приложения. Сначала отдельный inference-сервер загружает файл и предоставляет OpenAI-compatible endpoint.
 
 На Windows установите llama.cpp (если ещё не установлен):
 
@@ -120,6 +135,7 @@ winget install -e --id ggml.llamacpp
 
 ```powershell
 .\scripts\run-gguf-server.ps1 -Model kunoichi
+
 # или
 .\scripts\run-gguf-server.ps1 -Model tiefighter
 ```
@@ -166,7 +182,15 @@ Invoke-RestMethod http://127.0.0.1:8080/v1/models
 koboldcpp.exe --model "$env:APPDATA\faraday\models\mistral.7b.kunoichi.gguf_v2.q4_k_m" --host 127.0.0.1 --port 5001 --contextsize 4096
 ```
 
-Тогда в `.env`: `LLM_BASE_URL=http://127.0.0.1:5001/v1`, `LLM_MODEL=local-model`, `LLM_PROVIDER=openai_compatible`. При необходимости API key можно оставить пустым для loopback адреса.
+Тогда в `.env`:
+
+```dotenv
+LLM_BASE_URL=http://127.0.0.1:5001/v1
+LLM_MODEL=local-model
+LLM_PROVIDER=openai_compatible
+```
+
+При необходимости API key можно оставить пустым для loopback адреса.
 
 > Важно: наличие GGUF-контейнера не означает поддержку tools. Kunoichi/Tiefighter подходят для теста обычного RAG, но tool-calling нужно проверять отдельно. Для Agentic RAG разумнее выбрать более современную instruct-модель, у которой явно подтверждена поддержка tool calling.
 
@@ -288,8 +312,8 @@ Endpoint `/api/v1/identify` проксирует одну фотографию �
 Пример запроса:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/ask \\
-  -H 'Content-Type: application/json' \\
+curl -X POST http://127.0.0.1:8000/api/v1/ask \
+  -H 'Content-Type: application/json' \
   -d '{"query":"Венерина мухоловка ловушка створки","limit":5,"agentic":true}'
 ```
 
@@ -310,32 +334,66 @@ python -m backend.scripts.run_benchmark
 ```text
 .
 ├── index.html, login.html, register.html
-├── css/style.css, js/app.js, img/
+├── admin.html                  # демонстрационная административная панель
+├── css/style.css, js/app.js
+├── js/admin.js                 # логика административной панели
+├── img/
 ├── backend/
-│   ├── app/                 # FastAPI, конфигурация, corpus, BM25, LLM, RAG
-│   ├── tests/               # unit и API tests
-│   └── scripts/             # benchmark, corpus validator и Excel importer
+│   ├── app/                    # FastAPI, конфигурация, corpus, BM25, LLM, RAG
+│   ├── tests/                  # unit и API tests
+│   └── scripts/                # benchmark, corpus validator и Excel importer
 ├── data/
-│   ├── plants.jsonl         # демонстрационный JSONL-корпус
-│   ├── bestiary.db          # положить вашу SQLite БД сюда (не включается в Git)
-│   └── benchmark.json       # smoke benchmark
-├── docs/                    # SDD, архитектура, API, retrieval и тестирование
+│   ├── plants.jsonl            # демонстрационный JSONL-корпус
+│   ├── bestiary.db             # положить вашу SQLite БД сюда (не включается в Git)
+│   └── benchmark.json          # smoke benchmark
+├── docs/                       # SDD, архитектура, API, retrieval и тестирование
 ├── scripts/run-gguf-server.ps1 # локальный запуск ваших GGUF через llama.cpp
 ├── requirements.txt
-├── requirements-semantic.txt # optional dependency только для future dense retrieval
+├── requirements-semantic.txt  # optional dependency только для future dense retrieval
 └── .env.example
 ```
 
 ## 12. Известные ограничения
 
-- При DATA_SOURCE=jsonl корпус остаётся демонстрационным (4 записи). При DATA_SOURCE=sqlite используются реальные строки вашей БД; качество зависит от наполненности источниками и описаниями.
+- При `DATA_SOURCE=jsonl` корпус остаётся демонстрационным (4 записи). При `DATA_SOURCE=sqlite` используются реальные строки вашей БД; качество зависит от наполненности источниками и описаниями.
 - Поиск реализует классический BM25 без лемматизации/стемминга; русские падежные формы могут не совпадать.
 - Dense/vector retrieval и hybrid search пока не реализованы; `requirements-semantic.txt` оставлен как опциональная заготовка для последующего этапа.
 - Живые вызовы Ollama/llama.cpp/KoboldCpp/внешнего LLM не проверялись без пользовательской конфигурации; tool loop протестирован заглушкой. Tiefighter/Kunoichi рекомендуется использовать без Agentic RAG.
 - Живой Pl@ntNet вызов не проверялся без API key.
-- История чатов хранится в `localStorage` конкретного браузера; серверная синхронизация и реальные учётные записи не реализованы. Страницы входа/регистрации остаются демонстрационными. Перед публичным развёртыванием нужны аутентификация, rate limiting, политика доступа и наблюдаемость; текущая сборка предназначена для локального/контролируемого запуска.
+- История чатов хранится в `localStorage` конкретного браузера; серверная синхронизация и реальные учётные записи не реализованы. Страницы входа/регистрации остаются демонстрационными.
+- Административная панель также работает в демонстрационном режиме: пользователи и растения представлены демонстрационными записями, а изменения хранятся только в `localStorage` текущего браузера. Серверная синхронизация данных панели не реализована.
+- Панель администратора не защищена серверной проверкой роли и доступна по прямому адресу. Она предназначена для демонстрации frontend-сценариев, а не для управления реальными пользовательскими данными.
+- Перед публичным развёртыванием нужны полноценная аутентификация, серверная проверка ролей и прав доступа, rate limiting, политика доступа и наблюдаемость; текущая сборка предназначена для локального/контролируемого запуска.
 - Ответы не являются медицинской консультацией, определением съедобности или гарантированной идентификацией растения.
 
 ## 13. Документация
 
 Начните с `docs/SDD.md`. Актуальные источники данных описаны в `docs/architecture/sqlite-data-source.md`, локальные GGUF-провайдеры — в `docs/architecture/local-gguf.md`; остальные контракты находятся в `docs/architecture/`, правила корпуса и метрики — в `docs/retrieval/`.
+
+Дополнительная документация:
+
+- [Описание проекта](docs/project-description.md)
+- [Текущее состояние frontend](docs/frontend/current-frontend.md)
+- [Панель администратора](docs/frontend/admin-panel.md)
+- [Системная документация SDD](docs/SDD.md)
+- [Чек-лист контрольной точки](docs/checkpoint-1.md)
+- [Продуктовые требования](docs/product/requirements.md)
+- [Пользовательские сценарии](docs/product/user-stories.md)
+- [Спецификация интерфейса](docs/interface/interface-spec.md)
+- [Обзор архитектуры](docs/architecture/system-overview.md)
+- [Черновой API-контракт](docs/architecture/api-contract.md)
+- [План тестирования](docs/testing/test-plan.md)
+
+## 14. Проверка административной панели
+
+Для проверки демонстрационной административной панели:
+
+1. Запустите FastAPI backend согласно инструкции выше.
+2. Откройте `admin.html` по адресу [http://127.0.0.1:8000/admin.html](http://127.0.0.1:8000/admin.html).
+3. В разделе «Пользователи» добавьте тестовую запись, измените её, заблокируйте и удалите.
+4. В разделе «Каталог растений» добавьте и отредактируйте карточку.
+5. Обновите страницу и убедитесь, что изменения остались в браузере.
+6. Проверьте поиск, навигацию, переключение темы и отображение на узком экране.
+7. Для сброса демонстрационных данных удалите ключи `flora-admin-users` и `flora-admin-plants` из `localStorage`.
+
+Подробности и ограничения приведены в `docs/frontend/admin-panel.md`.
